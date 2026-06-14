@@ -1,0 +1,8 @@
+{
+  "name": "Remix: NutriSense",
+  "description": "Analyze and track food nutrients by scanning visually or nutrition labels, with an extensive embedded food database and daily targets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

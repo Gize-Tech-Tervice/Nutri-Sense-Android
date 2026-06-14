@@ -1,0 +1,133 @@
+package com.example.api
+
+import android.graphics.Bitmap
+import android.util.Base64
+import android.util.Log
+import com.example.BuildConfig
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+
+class GeminiRepository {
+
+    private val moshi = Moshi.Builder()
+        .add(KotlinJsonAdapterFactory())
+        .build()
+    private val nutritionFactAdapter = moshi.adapter(NutritionFact::class.java)
+
+    // Schema to enforce structured JSON output from Gemini
+    private val nutritionSchema = ResponseSchema(
+        type = "OBJECT",
+        properties = mapOf(
+            "foodName" to PropertySchema("STRING", "Descriptive title of the scanned food or label item (e.g. Greek Yogurt, Whole Milk, Pizza Slice)"),
+            "calories" to PropertySchema("NUMBER", "Energy/Calories contained in this item (kcal)"),
+            "carbs" to PropertySchema("NUMBER", "Total carbohydrates (grams)"),
+            "protein" to PropertySchema("NUMBER", "Total protein (grams)"),
+            "fat" to PropertySchema("NUMBER", "Total fat (grams)"),
+            "sodium" to PropertySchema("NUMBER", "Total sodium (milligrams)"),
+            "sugar" to PropertySchema("NUMBER", "Total sugar (grams)"),
+            "fiber" to PropertySchema("NUMBER", "Total dietary fiber (grams)"),
+            "vitaminC" to PropertySchema("NUMBER", "Vitamin C content (milligrams)"),
+            "vitaminA" to PropertySchema("NUMBER", "Vitamin A content (micrograms, mcg)"),
+            "calcium" to PropertySchema("NUMBER", "Calcium content (milligrams)"),
+            "iron" to PropertySchema("NUMBER", "Iron content (milligrams)"),
+            "potassium" to PropertySchema("NUMBER", "Potassium content (milligrams)"),
+            "servingSize" to PropertySchema("STRING", "Portion size description or label weight (e.g., 1 Container, 100g, 1 Slice)")
+        ),
+        required = listOf("foodName", "calories", "carbs", "protein", "fat", "servingSize")
+    )
+
+    suspend fun analyzeFoodImage(bitmap: Bitmap, isLabel: Boolean): NutritionFact? = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e("GeminiRepository", "API Key is missing!")
+            return@withContext null
+        }
+
+        val base64Image = bitmap.toBase64()
+        val prompt = if (isLabel) {
+            "You are a registered dietitian. Scan this nutrition facts label image and extract the nutrient content exactly as listed. Fit it into the requested JSON schema."
+        } else {
+            "You are a computer vision nutrition expert. Identify the food item in this image, estimate its size/portion to the best of your ability, and calculate its nutrition. Fit it into the requested JSON schema."
+        }
+
+        val request = GeminiRequest(
+            contents = listOf(
+                Content(
+                    parts = listOf(
+                        Part(text = prompt),
+                        Part(inlineData = InlineData(mimeType = "image/jpeg", data = base64Image))
+                    )
+                )
+            ),
+            generationConfig = GenerationConfig(
+                responseMimeType = "application/json",
+                responseSchema = nutritionSchema,
+                temperature = 0.4
+            )
+        )
+
+        try {
+            val response = RetrofitClient.service.generateContent(apiKey, request)
+            val jsonText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            if (jsonText != null) {
+                Log.d("GeminiRepository", "Raw Response: $jsonText")
+                return@withContext nutritionFactAdapter.fromJson(jsonText)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiRepository", "Error sending image to Gemini API", e)
+        }
+        return@withContext null
+    }
+
+    suspend fun analyzeFoodText(description: String): NutritionFact? = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e("GeminiRepository", "API Key is missing!")
+            return@withContext null
+        }
+
+        val prompt = "Estimate the nutrient values for the following food item or meal description: \"$description\". Be as accurate as possible for the described portion and fit it into the requested JSON schema."
+
+        val request = GeminiRequest(
+            contents = listOf(
+                Content(
+                    parts = listOf(Part(text = prompt))
+                )
+            ),
+            generationConfig = GenerationConfig(
+                responseMimeType = "application/json",
+                responseSchema = nutritionSchema,
+                temperature = 0.5
+            )
+        )
+
+        try {
+            val response = RetrofitClient.service.generateContent(apiKey, request)
+            val jsonText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            if (jsonText != null) {
+                Log.d("GeminiRepository", "Raw Response: $jsonText")
+                return@withContext nutritionFactAdapter.fromJson(jsonText)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiRepository", "Error sending text to Gemini API", e)
+        }
+        return@withContext null
+    }
+
+    private fun Bitmap.toBase64(): String {
+        val outputStream = ByteArrayOutputStream()
+        // Downscale image to max 1024px to keep bytes small, reducing upload time and potential timeout
+        val maxDim = 1024
+        val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+        val finalBitmap = if (ratio < 1.0f) {
+            Bitmap.createScaledBitmap(this, (width * ratio).toInt(), (height * ratio).toInt(), true)
+        } else {
+            this
+        }
+        finalBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+        return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+    }
+}
