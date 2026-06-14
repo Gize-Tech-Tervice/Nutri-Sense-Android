@@ -117,6 +117,59 @@ class GeminiRepository {
         return@withContext null
     }
 
+    suspend fun generateRecommendations(
+        name: String,
+        weight: Double,
+        targetWeight: Double,
+        age: Int,
+        gender: String,
+        activity: String,
+        todayMeals: List<String>,
+        waterIntakeMl: Int
+    ): String? = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e("GeminiRepository", "API Key is missing!")
+            return@withContext "API Key is missing or default! Set your GEMINI_API_KEY secure secret to generate live personalized expert tips."
+        }
+
+        val mealsStr = if (todayMeals.isEmpty()) "No meals logged yet today." else todayMeals.joinToString(", ")
+        val goalStr = if (targetWeight < weight) "Weight Loss / Caloric Deficit" else "Lean Muscle Gain / Active Bulking"
+        val prompt = ("" +
+            "You are a licensed dietician, certified sports coach, and health expert. " +
+            "Provide highly personalized dietary suggestions and expert recommendations for $name based on their fitness attributes:\n" +
+            "- Age: $age years\n" +
+            "- Gender: $gender\n" +
+            "- Current Weight: $weight kg\n" +
+            "- Goal Weight: $targetWeight kg\n" +
+            "- Fitness Target: $goalStr\n" +
+            "- Daily Activity Profile: $activity\n" +
+            "- Hydration Progress today: $waterIntakeMl ml (Daily target: 2500 ml)\n" +
+            "- Foods Tracked today: $mealsStr\n\n" +
+            "Output your specialized assessment response in three succinct and beautiful segments:\n" +
+            "1. **Metabolic State & Caloric Thresholds**: Estimate recommended caloric and water limits for this profile context.\n" +
+            "2. **Strategic Macronutrient Goals**: Provide 3 high-impact, actionable nutrition tips designed to hit their fitness target.\n" +
+            "3. **Recommended Meal Suggestion**: Describe a specific, easy-to-create custom meal or breakfast choice tailored to their $activity lifestyle.\n\n" +
+            "Keep the response inspiring, conversational, professional, and structured strictly using clean bullets or simple headings. Do not use markdown headers (# or ##), but you can use double asterisks (**) for premium highlighting.")
+
+        val request = GeminiRequest(
+            contents = listOf(
+                Content(parts = listOf(Part(text = prompt)))
+            ),
+            generationConfig = GenerationConfig(
+                temperature = 0.6
+            )
+        )
+
+        try {
+            val response = RetrofitClient.service.generateContent(apiKey, request)
+            return@withContext response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+        } catch (e: Exception) {
+            Log.e("GeminiRepository", "Error generating personalized coaching recommendations from Gemini API", e)
+        }
+        return@withContext "We experienced trouble contacting the dietary AI advisor right now. Please try again in a moment."
+    }
+
     private fun Bitmap.toBase64(): String {
         val outputStream = ByteArrayOutputStream()
         // Downscale image to max 1024px to keep bytes small, reducing upload time and potential timeout

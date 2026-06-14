@@ -816,6 +816,53 @@ class NutrientViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // --- AI Diet Coach & Personalized Advisor Integration ---
+    private val _isGeneratingRecommendations = MutableStateFlow(false)
+    val isGeneratingRecommendations: StateFlow<Boolean> = _isGeneratingRecommendations.asStateFlow()
+
+    private val _dietaryRecommendations = MutableStateFlow<String?>(null)
+    val dietaryRecommendations: StateFlow<String?> = _dietaryRecommendations.asStateFlow()
+
+    fun generateDietaryRecommendations() {
+        viewModelScope.launch {
+            _isGeneratingRecommendations.value = true
+            _dietaryRecommendations.value = null
+            try {
+                val name = _userProfileName.value
+                val weight = _userProfileWeight.value
+                val target = _userProfileTargetWeight.value
+                val age = _userProfileAge.value
+                val gender = _userProfileGender.value
+                val activity = _userProfileActivity.value
+                val water = _waterIntake.value
+                
+                val todayLogsList = foodLogsForSelectedDate.value
+                val mealNames = todayLogsList.map { "${it.foodName} (${it.calories.toInt()} kcal)" }
+                
+                val result = geminiRepository.generateRecommendations(
+                    name = name,
+                    weight = weight,
+                    targetWeight = target,
+                    age = age,
+                    gender = gender,
+                    activity = activity,
+                    todayMeals = mealNames,
+                    waterIntakeMl = water
+                )
+                _dietaryRecommendations.value = result
+            } catch (e: Exception) {
+                Log.e("NutrientViewModel", "Error in dietician coaching pipeline", e)
+                _dietaryRecommendations.value = "An unexpected error occurred: ${e.localizedMessage}"
+            } finally {
+                _isGeneratingRecommendations.value = false
+            }
+        }
+    }
+
+    fun clearDietaryRecommendations() {
+        _dietaryRecommendations.value = null
+    }
+
     companion object {
         fun getCurrentDateString(): String {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
